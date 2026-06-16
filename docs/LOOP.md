@@ -1,6 +1,6 @@
 # Engineering the Core Logic (`app/agent.py`)
 
-The orchestration architecture of Agentern is centered entirely within the `AgentLoop` class inside `app/agent.py`. It establishes a sequential execution environment designed to optimize the performance of local, consumer-tier hardware models.
+The orchestration architecture of Agentern is centered entirely within the `AgentLoop` class inside `app/loop.py`. It establishes a sequential execution environment designed to optimize the performance of local, consumer-tier hardware models.
 
 ---
 

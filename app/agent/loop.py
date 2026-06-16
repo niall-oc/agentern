@@ -1,7 +1,7 @@
 import httpx
 import json
 import os
-from app.prompts import get_prompt
+from app.agent.prompts import get_prompt
 from app.vector.chroma import VectorStore
 
 class AgentLoop:
