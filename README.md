@@ -146,3 +146,32 @@ Open your `~/.continue/config.json` and add the following to the `models` array:
   ]
 }
 ```
+
+## Performance Evaluation & Benchmarking
+
+The system includes an automated evaluation suite (`evaluate_system.py`) to benchmark your local model library against the Agentern orchestrated pipeline. 
+
+### How the Evaluation Script Works
+
+The evaluation tool automates a side-by-side performance comparison to measure the latency overhead and quality changes introduced by the agent loop:
+
+1. **Dynamic Model Discovery:** It queries the host Ollama inventory endpoint (`/api/tags`) at runtime to automatically identify all local models currently available. Non-text multimodal models (like `llava`) are safely bypassed.
+2. **Raw Model Execution:** The script passes a standardized prompt directly to the discovered Ollama model with text-streaming disabled, measuring exactly how long the base model takes to compile a single response.
+3. **Agentern Loop Orchestration:** The script then initializes an isolated `AgentLoop` instance passing the same model identifier. The task passes through the entire multi-stage state machine (Triage &rarr; Planning &rarr; Plan Audit &rarr; Generation &rarr; Quality Review Cycles).
+4. **Automated Report Compilation:** The script creates an `eval_reports/` directory on your host volume workspace. For each model tested, it generates an isolated Markdown report document containing latency metrics, the exact speed delta, and the raw side-by-side output content blocks.
+
+### Execution
+
+Run the evaluation script directly inside the active service container:
+
+```bash
+docker exec -it agentern python /app/evaluate_system.py
+```
+### Reviewing the Results
+
+Once complete, navigate to the newly generated reports directory in your local workspace to analyze the markdown metrics:
+
+```
+ls -l app/eval_reports/
+cat app/eval_reports/comparison_qwen2-5-coder_7b.md
+```
