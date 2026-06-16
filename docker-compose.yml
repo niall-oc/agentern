@@ -3,13 +3,17 @@ version: '3.8'
 services:
   agentern_api:
     build: .
+    container_name: agentern
     ports:
       - "17111:8000"
     volumes:
       - ./chroma_data:/app/chroma_data
+      - ./app:/app
     environment:
-      # Use host.docker.internal to route back to local hardware Ollama
       - OLLAMA_URL=http://172.17.0.1:11434/api/generate
+      - PYTHONPATH=/app
+      - CHROMA_TELEMETRY_MOUNT=False
+      - TELEMETRY_ENABLED=False
     networks:
       - agentern_net
 

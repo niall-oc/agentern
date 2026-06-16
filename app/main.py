@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from app.agent.loop import AgentLoop
+from agent.loop import AgentLoop
 
 app = FastAPI(title="Agentern API")
 

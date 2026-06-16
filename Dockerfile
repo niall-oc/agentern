@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim 
 
 WORKDIR /app
 
@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy the contents of the app folder directly into /app
+COPY app/ .
 
-# Run the FastAPI application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application directly from the root workspace
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
