@@ -32,7 +32,11 @@ curl -fsSL [https://ollama.com/install.sh](https://ollama.com/install.sh) | sh
 ```bash
 ollama pull qwen2.5-coder:7b
 ollama pull llava
+ollama pull deepseek-coder-v2
+ollama pull llama3.1:8b
 ```
+
+Pull as many or as few models as you need for your setup.
 
 ---
 
