@@ -1,8 +1,10 @@
 <div align="center">
   <h1>⚙️ AGENTERN</h1>
-  <p><b>Local, Autonomous Agentic Proxy for Native Hardware</b></p>
-  <hr>
 </div>
+
+The local agent that acts like an intern, but actually checks its **own** work.
+
+
 
 ## Introduction
 
