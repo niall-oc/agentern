@@ -6,8 +6,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from agent.loop import AgentLoop
+import yaml
 
 app = FastAPI(title="Agentern API")
+
+with open('agent.yaml') as f:
+    agent_config = yaml.safe_load(f)
 
 class Message(BaseModel):
     role: str
@@ -60,7 +64,7 @@ async def chat_completions(request: ChatCompletionRequest):
     target_model = request.model.replace("agentern-", "") if request.model.startswith("agentern-") else request.model
     
     # Instantiate a specific loop tied to the user's selected model
-    request_loop = AgentLoop(model=target_model)
+    request_loop = AgentLoop(target_model, agent_config)
     
     if request.stream:
         return StreamingResponse(request_loop.stream_loop(user_msg), media_type="text/event-stream")

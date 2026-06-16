@@ -2,46 +2,16 @@ import httpx
 import json
 import os
 import asyncio
-from agent.prompts import get_prompt
+from typing import AsyncGenerator, Optional
 from vector.chroma import VectorStore
 
-# =====================================================================
-# USER-FACING MESSAGING CONFIGURATION
-# Modify these strings to change how the agent talks to the user
-# across both run_loop and stream_loop execution pipelines.
-# =====================================================================
-USER_MESSAGES = {
-    "steps": {
-        "triage": "## 1. Analyzing your request",
-        "planning": "## 2. Planning the solution",
-        "audit": "## 3. Reviewing the plan",
-        "execute": "## 4. Working on the answer",
-        "review": "## 5. Checking the final output"
-    },
-    "status": {
-        "initializing": "[Searching your vector database for relevant context...]",
-        "mode_code": "Task type identified: Software Engineering / Coding",
-        "mode_text": "Task type identified: General Information / Text",
-        "audit_ledger": "**Review findings:**",
-        "plan_fix": "*The initial plan needs adjustments to match your request perfectly. Correcting it now...*",
-        "plan_updated": "**Updated plan:**",
-        "review_eval": "**Quality check results:**",
-        "review_passed": "**Success:** The output passed all checks.",
-        "review_fix": "*Fixing issues found during the quality check...*",
-        "review_updated": "**Revised output:**",
-        "final_output_header": "## Final Response"
-    },
-    "technical": {
-        "engine_code": "Routed to Software Engineering Engine",
-        "engine_text": "Routed to Content Generation Engine",
-        "turn_label": "Attempt"
-    }
-}
 
 class AgentLoop:
-    def __init__(self, model="qwen2.5-coder"):
+    def __init__(self, model, agent_config, vector_search=False):
         self.llm_url = os.getenv("OLLAMA_URL", "http://172.17.0.1:11434/api/generate")
         self.model = model
+        self.agent_config = agent_config
+        self.vector_search = vector_search
         self.vector_store = VectorStore()
 
     async def call_llm(self, system: str, prompt: str) -> str:
@@ -49,11 +19,14 @@ class AgentLoop:
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=180.0) as client:
-                    res = await client.post(self.llm_url, json={
-                        "model": self.model,
-                        "prompt": f"{system}\n\n{prompt}",
-                        "stream": False
-                    })
+                    res = await client.post(
+                        self.llm_url,
+                        json={
+                            "model": self.model,
+                            "prompt": f"{system}\n\n{prompt}",
+                            "stream": False,
+                        },
+                    )
                     if res.status_code == 200:
                         return res.json().get("response", "").strip()
                     return f"Error: LLM returned status {res.status_code}"
@@ -66,120 +39,211 @@ class AgentLoop:
                 return f"Error connecting to LLM: {str(e)}"
         return "Error: Failed to fetch generation after multiple retries."
 
+    def _build_classifier_prompt(self) -> str:
+        channels = self.agent_config["EXECUTION_CHANNELS"]
+        base_prompt = channels["prompt"].strip()
+        
+        options_str = ""
+        for route_key, route_data in channels["routes"].items():
+            options_str += f"- {route_key}: {route_data['description']}\n"
+            
+        options_str += "Output exactly one keyword option. Do not include any formatting, markdown, or introductory text."
+        
+        return f"{base_prompt}\n\n{options_str}"
+
+    def _get_route_config(self, modality_raw: str) -> dict:
+        routes = self.agent_config["EXECUTION_CHANNELS"]["routes"]
+        modality = modality_raw.strip().upper()
+        
+        # Exact match
+        if modality in routes:
+            return routes[modality], modality
+            
+        # Fallback heuristic if LLM output includes formatting
+        for route_key in routes.keys():
+            if route_key in modality:
+                return routes[route_key], route_key
+                
+        # Default fallback
+        fallback_key = list(routes.keys())[0]
+        return routes[fallback_key], fallback_key
+
+    # ------------------------------------------------------------------
+    # Shared pipeline: an async generator that yields (label, content)
+    # tuples progressively.  Both run_loop and stream_loop iterate over
+    # it with 'async for' and handle each notification in their own way.
+    # ------------------------------------------------------------------
+    async def _execute_pipeline(
+        self,
+        task: str,
+        context: str,
+        route_config: dict,
+        route_key: str,
+    ) -> AsyncGenerator[tuple[str, str], None]:
+
+        yield (
+            route_config['description'],
+            f"Task type identified: {route_key.replace('_', ' ').title()}",
+        )
+
+        artifacts = {
+            "task": task,
+            "context": context,
+        }
+
+        stages = route_config.get("stages", {})
+
+        for stage_name, stage_cfg in stages.items():
+
+            prompt = stage_cfg["prompt"]
+            critique_prompt = stage_cfg.get("critique")
+            max_turns = stage_cfg.get("max_refinement_turns", 0)
+
+            yield (
+                f"{stage_name}", "one moment..."
+            )
+
+            stage_input = f"""
+            Task:
+            {task}
+
+            Context:
+            {context}
+
+            Previous Outputs:
+            {self._format_artifacts(artifacts)}
+            """
+
+            output = await self.call_llm(prompt, stage_input)
+
+            yield (
+                f"{stage_name}_output",
+                output,
+            )
+
+            for turn in range(max_turns):
+
+                if not critique_prompt:
+                    break
+
+                critique_input = f"""
+                Task:
+                {task}
+
+                Stage:
+                {stage_name}
+
+                Output:
+                {output}
+                """
+
+                critique = await self.call_llm(
+                    critique_prompt,
+                    critique_input,
+                )
+
+                yield (
+                    f"{stage_name}_review_{turn + 1}",
+                    critique,
+                )
+
+                critique_upper = critique.upper()
+
+                if (
+                    "PASS" in critique_upper
+                    or "PLAN_PASS" in critique_upper
+                ):
+                    break
+
+                revision_input = f"""
+                Task:
+                {task}
+
+                Context:
+                {context}
+
+                Current Output:
+                {output}
+
+                Required Corrections:
+                {critique}
+                """
+
+                output = await self.call_llm(
+                    prompt,
+                    revision_input,
+                )
+
+                yield (
+                    f"{stage_name}_revision_{turn + 1}",
+                    output,
+                )
+
+            artifacts[stage_name] = output
+            artifacts["latest"] = output
+
+        yield ("__FINAL__", artifacts["latest"])
+    
+    def _format_artifacts(self, artifacts: dict) -> str:
+        """Format the artifacts into a single string."""
+        sections = []
+
+        for key, value in artifacts.items():
+
+            if key in ("task", "context", "latest"):
+                continue
+
+            sections.append(f"=== {key.upper()} ===\n{value}\n")
+
+        return "\n".join(sections)
+
     async def run_loop(self, task: str, on_step_cb=None) -> str:
-        context = self.vector_store.search(task)
-        
-        # Step 1: Classify Task Modality
-        modality = await self.call_llm(get_prompt("CLASSIFIER_PROMPT"), f"Task: {task}")
-        is_code_task = "CODE" in modality.upper()
-        if on_step_cb:
-            msg = USER_MESSAGES["technical"]["engine_code"] if is_code_task else USER_MESSAGES["technical"]["engine_text"]
-            await on_step_cb(USER_MESSAGES["steps"]["triage"], msg)
+        # 1. Retrieve context & classify modality
+        context =""
+        if self.vector_search:
+            context = self.vector_store.search(task)
+        classifier_system_prompt = self._build_classifier_prompt()
+        modality_raw = await self.call_llm(classifier_system_prompt, f"Task: {task}")
+        route_config, route_key = self._get_route_config(modality_raw)
 
-        # Step 2: Formulate Initial Plan
-        plan = await self.call_llm(get_prompt("PLANNER_PROMPT"), f"Task: {task}\nContext: {context}")
-        if on_step_cb:
-            await on_step_cb(USER_MESSAGES["steps"]["planning"], plan)
-            
-        # Step 3: Plan Critique Audit Loop
-        for p_idx in range(2):
-            plan_audit = await self.call_llm(
-                get_prompt("PLAN_CRITIQUE_PROMPT"), 
-                f"Original Task: {task}\nProposed Plan: {plan}"
-            )
-            if on_step_cb:
-                label = f"{USER_MESSAGES['steps']['audit']} ({USER_MESSAGES['technical']['turn_label']} {p_idx+1})"
-                await on_step_cb(label, plan_audit)
-                
-            if "PLAN_PASS" in plan_audit.upper():
-                break
-                
-            # Re-plan if plan auditor objects
-            plan = await self.call_llm(
-                get_prompt("PLANNER_PROMPT"), 
-                f"Task: {task}\nContext: {context}\nFix Planning Flaws: {plan_audit}\nPrevious Plan: {plan}"
-            )
+        # 2. Run the shared pipeline -- iterate progressively and forward
+        #    each notification to the callback.
+        final_output: str = ""
+        async for label, content in self._execute_pipeline(
+            task, context, route_config, route_key
+        ):
+            if label == "__FINAL__":
+                final_output = content
+            elif on_step_cb:
+                await on_step_cb(label, content)
 
-        # Step 4: Execute Base Generation via Dynamic Routing
-        exec_prompt = get_prompt("WRITER_PROMPT") if is_code_task else get_prompt("RESPONDER_PROMPT")
-        output = await self.call_llm(exec_prompt, f"Task: {task}\nPlan: {plan}\nContext: {context}")
-        if on_step_cb:
-            await on_step_cb(USER_MESSAGES["steps"]["execute"], output)
-        
-        # Step 5: Final Execution Critique Loop
-        max_retries = 2
-        for i in range(max_retries):
-            critique = await self.call_llm(get_prompt("CRITIQUE_PROMPT"), f"Task: {task}\nOutput: {output}")
-            if on_step_cb:
-                label = f"{USER_MESSAGES['steps']['review']} {i+1}"
-                await on_step_cb(label, critique)
-
-            if "PASS" in critique.upper():
-                break
-            
-            output = await self.call_llm(
-                exec_prompt, 
-                f"Task: {task}\nFix issues: {critique}\nCurrent Version: {output}"
-            )
-            if on_step_cb:
-                label = f"{USER_MESSAGES['status']['review_updated']} ({USER_MESSAGES['technical']['turn_label']} {i+1})"
-                await on_step_cb(label, output)
-            
-        return output
+        return final_output
 
     async def stream_loop(self, task: str):
-        def make_sse(text):
+        def make_sse(text: str) -> str:
             return f"data: {json.dumps({'choices': [{'delta': {'content': text}}]})}\n\n"
 
         yield make_sse("<think>\n")
-        yield make_sse(f"{USER_MESSAGES['status']['initializing']}\n")
-        
-        # 1. Triage
-        modality = await self.call_llm(get_prompt("CLASSIFIER_PROMPT"), f"Task: {task}")
-        is_code_task = "CODE" in modality.upper()
-        mode_str = USER_MESSAGES["status"]["mode_code"] if is_code_task else USER_MESSAGES["status"]["mode_text"]
-        yield make_sse(f"{USER_MESSAGES['steps']['triage']}\n- {mode_str}\n\n---\n")
 
-        context = self.vector_store.search(task)
-        
-        # 2. Plan Generation
-        yield make_sse(f"{USER_MESSAGES['steps']['planning']}\n")
-        plan = await self.call_llm(get_prompt("PLANNER_PROMPT"), f"Task: {task}\nContext: {context}")
-        yield make_sse(f"{plan}\n\n---\n")
-        
-        # 3. Plan Verification
-        yield make_sse(f"{USER_MESSAGES['steps']['audit']}\n")
-        plan_audit = await self.call_llm(get_prompt("PLAN_CRITIQUE_PROMPT"), f"Original Task: {task}\nProposed Plan: {plan}")
-        yield make_sse(f"{USER_MESSAGES['status']['audit_ledger']} {plan_audit}\n\n")
-        
-        if "PLAN_PASS" not in plan_audit.upper():
-            yield make_sse(f"{USER_MESSAGES['status']['plan_fix']}\n")
-            plan = await self.call_llm(get_prompt("PLANNER_PROMPT"), f"Task: {task}\nContext: {context}\nFix Flaws: {plan_audit}\nPrevious Plan: {plan}")
-            yield make_sse(f"{USER_MESSAGES['status']['plan_updated']}\n{plan}\n\n")
-        yield make_sse("---\n")
+        # 1. Retrieve context & classify modality
+        context =""
+        if self.vector_search:
+            context = self.vector_store.search(task)
+        classifier_system_prompt = self._build_classifier_prompt()
+        modality_raw = await self.call_llm(classifier_system_prompt, f"Task: {task}")
+        route_config, route_key = self._get_route_config(modality_raw)
 
-        # 4. Draft Generation Execution
-        yield make_sse(f"{USER_MESSAGES['steps']['execute']}\n")
-        exec_prompt = get_prompt("WRITER_PROMPT") if is_code_task else get_prompt("RESPONDER_PROMPT")
-        output = await self.call_llm(exec_prompt, f"Task: {task}\nPlan: {plan}\nContext: {context}")
-        yield make_sse(f"{output}\n\n---\n")
+        # 2. Run the shared pipeline -- convert each notification to SSE
+        #    frames *as it arrives*, yielding them progressively.
+        final_output: str = ""
+        async for label, content in self._execute_pipeline(
+            task, context, route_config, route_key
+        ):
+            if label == "__FINAL__":
+                final_output = content
         
-        # 5. Output Optimization Cycles
-        max_retries = 2
-        for i in range(max_retries):
-            yield make_sse(f"## {USER_MESSAGES['steps']['review'].split('## ')[-1]} {i+1}\n")
-            critique = await self.call_llm(get_prompt("CRITIQUE_PROMPT"), f"Task: {task}\nOutput: {output}")
-            yield make_sse(f"{USER_MESSAGES['status']['review_eval']}\n{critique}\n\n")
+            yield make_sse(f"{label}\n- {content}\n\n---\n")
             
-            if "PASS" in critique.upper():
-                yield make_sse(f"{USER_MESSAGES['status']['review_passed']}\n\n")
-                break
-                
-            yield make_sse(f"{USER_MESSAGES['status']['review_fix']}\n")
-            output = await self.call_llm(exec_prompt, f"Task: {task}\nFix issues: {critique}\nCurrent Version: {output}")
-            yield make_sse(f"{USER_MESSAGES['status']['review_updated']}\n{output}\n\n")
-
         yield make_sse("</think>\n\n")
-        yield make_sse(f"{USER_MESSAGES['status']['final_output_header']}\n")
-        yield make_sse(output)
+        yield make_sse(final_output)
         yield "data: [DONE]\n\n"

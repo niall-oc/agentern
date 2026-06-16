@@ -2,7 +2,13 @@
   <h1>⚙️ AGENTERN</h1>
 </div>
 
-The local agent that acts like an intern, but actually checks its **own** work.
+## An Agent designed using only YAML!
+
+Create an agentic workflow using only YAML.  Turn your local machine into a powerful agent that can handle complex tasks and perform deep reasoning.
+
+Simply pull models from ollama and launch ths agentern docker container.  Agentern will wrap all ollama models and serve on an openaiAPI completions endpoint.  You can configure your agent to run directly in **vscode** via **continue** OR in OpenWeb UI.
+
+
 
 
 
