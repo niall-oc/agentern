@@ -337,7 +337,7 @@ class AgentLoop:
     # Public entry points
     # ------------------------------------------------------------------
 
-    async def run_loop(self, task: str, on_step_cb=None) -> str:
+    async def run_loop(self, task: str) -> str:
         """Run the full agent pipeline and return the final output.
 
         This is the **non-streaming** entry point.  Progress
@@ -370,15 +370,12 @@ class AgentLoop:
         ):
             if label == "__FINAL__":
                 final_output = content
-            elif on_step_cb:
-                await on_step_cb(label, content)
             else:
                 thought_trace.append(f"=== {label} ===\n{content}")
 
-        # Prepend the reasoning trace to the final output
-        if thought_trace and not on_step_cb:
-            prompt_text = "\n\n".join(thought_trace)
-            final_output = f"<reasoning>\n{prompt_text}\n</reasoning>\n\n{final_output}"
+        
+        if thought_trace:
+            final_output = f"<reasoning>\n{thought_trace}\n</reasoning>\n\n{final_output}"
 
         return final_output
 
@@ -422,6 +419,8 @@ class AgentLoop:
         ):
             if label == "__FINAL__":
                 final_output = content
+            else:
+                yield make_sse(f"{label}\n- {content}\n\n---\n")
         
             yield make_sse(f"{label}\n- {content}\n\n---\n")
             

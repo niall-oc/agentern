@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from agent import AgentLoop
-from vector import ingest_directory
 import yaml
 
 app = FastAPI(title="Agentern API")
@@ -26,9 +25,8 @@ class ChatCompletionRequest(BaseModel):
 @app.get("/v1/models")
 async def list_models():
     # Derive the base Ollama URL to query available tags
-    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-    base_url = ollama_url.split("/api/")[0]
-    tags_url = f"{base_url}/api/tags"
+    ollama_url = os.getenv("OLLAMA_URL")
+    tags_url = f"{ollama_url.rstrip('/')}/api/tags"
     
     models_data = []
     try:
@@ -66,7 +64,9 @@ async def chat_completions(request: ChatCompletionRequest):
     
     # Instantiate a specific loop tied to the user's selected model
     ollama_url = os.getenv("OLLAMA_URL")
-    request_loop = AgentLoop(target_model, agent_config, base_url, db_path=os.getenv("CHROMADB_PATH"))
+    base_url = ollama_url.rstrip('/')
+    db_path = os.getenv("CHROMADB_PATH", None)
+    request_loop = AgentLoop(target_model, agent_config, base_url, db_path=db_path)
     
     if request.stream:
         return StreamingResponse(request_loop.stream_loop(user_msg), media_type="text/event-stream")
