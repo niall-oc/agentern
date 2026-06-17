@@ -7,13 +7,12 @@ services:
     ports:
       - "17111:8000"
     volumes:
-      - ./chroma_data:/app/chroma_data
       - ./app:/app
     environment:
       - OLLAMA_URL=http://172.17.0.1:11434/api/generate
       - PYTHONPATH=/app
-      - CHROMA_TELEMETRY_MOUNT=False
-      - TELEMETRY_ENABLED=False
+      - ANONYMIZED_TELEMETRY=False
+      - CHROMA_DB_PATH=${CHROMADB_PATH:-}"
     networks:
       - agentern_net
 
