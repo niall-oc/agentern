@@ -4,81 +4,98 @@
 Create a simple FAST API CRUD system for books
 
 ## Runtime
-18.07 seconds
+18.79 seconds
 
 ## Thinking / Output
 
-Here's a simple FastAPI CRUD (Create, Read, Update, Delete) system for managing books. This example uses `uvicorn` as the ASGI server and `fastapi` with `pydantic` for creating models, and in-memory storage for simplicity.
+Here's a simple FastAPI CRUD (Create, Read, Update, Delete) system for books. This example uses `uvicorn` as the ASGI server and `python-dotenv` to manage environment variables like the database URL.
 
-First, make sure you have FastAPI installed:
+First, install the required packages:
 
 ```bash
-pip install fastapi uvicorn pydantic
+pip install fastapi uvicorn python-dotenv tortoise-orm asyncpg
 ```
 
-Now, create a new file named `main.py`:
+Now, create a `.env` file in your project root with the following content (replace the values with your own database credentials):
+
+```
+DATABASE_URL=postgres://username:password@localhost/db_name
+```
+
+Create a `main.py` file and add the following code:
 
 ```python
-from typing import List
-
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from tortoise import fields, models
+from tortoise.orm import init_tortoise_db, generate_schema
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
-# In-memory storage for books.
-books = {}
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-class Book(BaseModel):
-    id: int
+class Book(models.Model):
+    id = fields.IntField(pk=True)
+    title = fields.CharField(50)
+    author = fields.CharField(50)
+    published_year = fields.IntField()
+
+    class PydanticMeta:
+        exclude = ["id"]
+
+class BookIn(BaseModel):
     title: str
     author: str
-    publication_year: int
+    published_year: int
 
-@app.post("/books/", response_model=Book)
-def create_book(book: Book):
-    if book.id in books:
-        raise HTTPException(status_code=400, detail="ID already exists")
-    books[book.id] = book
-    return book
+async def init_db():
+    await init_tortoise_db(
+        db_url=DATABASE_URL,
+        modules={"models": __name__},
+        generate_schemas=True
+    )
 
-@app.get("/books/", response_model=List[Book])
-def read_books():
-    return list(books.values())
+@app.on_event("startup")
+async def startup_event():
+    await init_db()
 
-@app.get("/books/{book_id}", response_model=Book)
-def read_book(book_id: int):
-    if book_id not in books:
-        raise HTTPException(status_code=404, detail="Book not found")
-    return books[book_id]
+@app.post("/books/")
+async def create_book(book: BookIn):
+    new_book = await Book.create(**book.dict())
+    return {"id": new_book.id, **new_book.__dict__}
 
-@app.put("/books/{book_id}", response_model=Book)
-def update_book(book_id: int, updated_book: Book):
-    if book_id not in books:
-        raise HTTPException(status_code=404, detail="Book not found")
-    books[book_id] = updated_book
-    return updated_book
+@app.get("/books/{book_id}")
+async def get_book(book_id: int):
+    book = await Book.filter(id=book_id).first_or_404()
+    return {"id": book.id, **book.__dict__}
+
+@app.put("/books/{book_id}")
+async def update_book(book_id: int, updated_book: BookIn):
+    book = await Book.filter(id=book_id).first_or_404()
+
+    for key, value in updated_book.dict().items():
+        setattr(book, key, value)
+
+    await book.save()
+    return {"id": book.id, **book.__dict__}
 
 @app.delete("/books/{book_id}")
-def delete_book(book_id: int):
-    if book_id not in books:
-        raise HTTPException(status_code=404, detail="Book not found")
-    del books[book_id]
+async def delete_book(book_id: int):
+    book = await Book.filter(id=book_id).first_or_404()
+    await book.delete()
     return {"detail": "Book deleted"}
 ```
 
-To run the API, use the following command:
+Finally, run the application using:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Now you can interact with your CRUD system using an API client like `curl`, Postman, or HTTPie.
+Now you have a simple FastAPI CRUD system for books running at `http://127.0.0.1:8000/`.
 
-Here's an example using `curl` to create a new book:
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"id": 1, "title": "The Catcher in the Rye", "author": "J.D. Salinger", "publication_year": 1951}' \
-  http://localhost:8000/books/
-```
+You can test it using tools like [Postman](https://www.postman.com/) or [curl](https://curl.se/).

@@ -4,151 +4,117 @@
 Create a simple FAST API CRUD system for books
 
 ## Runtime
-19.19 seconds
+19.91 seconds
 
 ## Thinking / Output
 
-Sure! Below is an example of how to create a simple CRUD (Create, Read, Update, Delete) system using FastAPI and Pydantic in Python. This example will demonstrate the basic operations on a `Book` model.
+Sure! Below is a basic example of how you can create a CRUD (Create, Read, Update, Delete) system for managing books using FastAPI and Python.
 
-First, ensure you have the necessary libraries installed:
+First, make sure you have the necessary dependencies installed:
 
-```bash
-pip install fastapi uvicorn pydantic
+```sh
+pip install fastapi uvicorn
 ```
 
-Here is a complete example:
+Then, you can create a simple FastAPI application as follows:
 
-1. **Define the Book Model:**
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 
-   Create a file named `models.py`:
+app = FastAPI()
 
-   ```python
-   from datetime import datetime
-   from typing import Optional
+# In-memory database simulation
+books_db = []
 
-   from pydantic import BaseModel, EmailStr
+class Book(BaseModel):
+    id: int
+    title: str
+    author: str
+    published_year: int
 
-   class BookBase(BaseModel):
-       title: str
-       author: str
-       published_date: datetime = datetime.now()
-       description: Optional[str] = None
+@app.post("/books/", response_model=Book)
+async def create_book(book: Book):
+    books_db.append(book.dict())
+    return book
 
-   class BookCreate(BookBase):
-       pass
+@app.get("/books/", response_model=List[Book])
+async def read_books():
+    return books_db
 
-   class BookUpdate(BookBase):
-       id: int
+@app.get("/books/{book_id}", response_model=Book)
+async def read_book(book_id: int):
+    for book in books_db:
+        if book['id'] == book_id:
+            return book
+    raise HTTPException(status_code=404, detail="Book not found")
 
-   class Book(BookBase):
-       id: int
-       owner_email: EmailStr
+@app.put("/books/{book_id}", response_model=Book)
+async def update_book(book_id: int, updated_book: Book):
+    for index, book in enumerate(books_db):
+        if book['id'] == book_id:
+            books_db[index] = updated_book.dict()
+            return updated_book
+    raise HTTPException(status_code=404, detail="Book not found")
 
-       class Config:
-           orm_mode = True
-   ```
+@app.delete("/books/{book_id}", response_model=None)
+async def delete_book(book_id: int):
+    for index, book in enumerate(books_db):
+        if book['id'] == book_id:
+            del books_db[index]
+            return {"detail": "Book deleted"}
+    raise HTTPException(status_code=404, detail="Book not found")
 
-2. **Define the CRUD Operations:**
-
-   Create a file named `book_service.py`:
-
-   ```python
-   from typing import List, Optional
-   from datetime import datetime
-   from models import BookBase, BookCreate, BookUpdate, Book
-
-   class BookService:
-       def __init__(self):
-           self.books = {}
-
-       def create_book(self, book: BookCreate) -> Book:
-           new_book_id = len(self.books) + 1
-           new_book = Book(id=new_book_id, **book.dict())
-           self.books[new_book_id] = new_book
-           return new_book
-
-       def get_books(self) -> List[Book]:
-           return list(self.books.values())
-
-       def get_book(self, book_id: int) -> Optional[Book]:
-           return self.books.get(book_id)
-
-       def update_book(self, book_id: int, book_update: BookUpdate) -> Optional[Book]:
-           if (book := self.get_book(book_id)) is None:
-               return None
-           updated_data = {**book.dict(), **book_update.dict(exclude_unset=True)}
-           self.books[book_id] = Book(id=book_id, **updated_data)
-           return self.books[book_id]
-
-       def delete_book(self, book_id: int) -> Optional[Book]:
-           if (book := self.get_book(book_id)) is None:
-               return None
-           del self.books[book_id]
-           return book
-   ```
-
-3. **Create the FastAPI Application:**
-
-   Create a file named `main.py`:
-
-   ```python
-   from fastapi import FastAPI, HTTPException
-   from pydantic import EmailStr
-   from book_service import BookService
-
-   app = FastAPI()
-   book_service = BookService()
-
-   @app.post("/books/", response_model=Book)
-   def create_book(book: BookCreate):
-       return book_service.create_book(book)
-
-   @app.get("/books/", response_model=List[Book])
-   def read_books():
-       return book_service.get_books()
-
-   @app.get("/books/{book_id}", response_model=Book)
-   def read_book(book_id: int):
-       book = book_service.get_book(book_id)
-       if not book:
-           raise HTTPException(status_code=404, detail="Book not found")
-       return book
-
-   @app.put("/books/{book_id}", response_model=Book)
-   def update_book(book_id: int, book_update: BookUpdate):
-       updated_book = book_service.update_book(book_id, book_update)
-       if not updated_book:
-           raise HTTPException(status_code=404, detail="Book not found")
-       return updated_book
-
-   @app.delete("/books/{book_id}", response_model=Optional[Book])
-   def delete_book(book_id: int):
-       deleted_book = book_service.delete_book(book_id)
-       if not deleted_book:
-           raise HTTPException(status_code=404, detail="Book not found")
-       return deleted_book
-   ```
-
-4. **Run the Application:**
-
-   You can run the FastAPI application using `uvicorn`:
-
-   ```bash
-   uvicorn main:app --reload
-   ```
-
-Now you have a simple CRUD system for books that allows you to create, read, update, and delete book records.
-
-To test this API, you can use tools like Postman or curl. For example, to create a new book:
-
-```curl
-POST http://127.0.0.1:8000/books/
-Content-Type: application/json
-
-{
-    "title": "The Great Gatsby",
-    "author": "F. Scott Fitzgerald"
-}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 ```
 
-This should help you get started with a basic CRUD system in FastAPI!
+### Explanation
+
+- **Book Model**: A Pydantic model `Book` is defined to represent the structure of a book with fields like `id`, `title`, `author`, and `published_year`.
+  
+- **Create Book** (`/books/` POST): Adds a new book to the in-memory database.
+
+- **Read Books** (`/books/` GET): Returns all books in the database.
+
+- **Read Book by ID** (`/books/{book_id}` GET): Retrieves a single book by its ID. Raises an HTTP 404 error if the book is not found.
+
+- **Update Book** (`/books/{book_id}` PUT): Updates a book with new data. Raises an HTTP 404 error if the book is not found.
+
+- **Delete Book** (`/books/{book_id}` DELETE): Deletes a book by its ID. Raises an HTTP 404 error if the book is not found.
+
+### Running the Application
+
+To run the FastAPI application, you can use the following command:
+
+```sh
+uvicorn main:app --reload
+```
+
+Replace `main` with the name of your Python script file (e.g., `fastapi_crud.py`). The `--reload` flag allows you to automatically reload the server when changes are made to the code.
+
+You can now test your API using tools like `curl`, Postman, or any other HTTP client. Here's an example of how to use `curl`:
+
+- Create a book:
+  ```sh
+  curl -X POST "http://127.0.0.1:8000/books/" -H "Content-Type: application/json" -d '{"id": 1, "title": "The Catcher in the Rye", "author": "J.D. Salinger", "published_year": 1951}'
+  ```
+
+- Get all books:
+  ```sh
+  curl "http://127.0.0.1:8000/books/"
+  ```
+
+- Update a book:
+  ```sh
+  curl -X PUT "http://127.0.0.1:8000/books/1" -H "Content-Type: application/json" -d '{"id": 1, "title": "To Kill a Mockingbird", "author": "Harper Lee", "published_year": 1960}'
+  ```
+
+- Delete a book:
+  ```sh
+  curl -X DELETE "http://127.0.0.1:8000/books/1"
+  ```
+
+This is a very simple and basic implementation, but it should give you a good starting point for building more complex applications with FastAPI.

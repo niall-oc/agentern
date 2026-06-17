@@ -4,100 +4,132 @@
 Create a simple FAST API CRUD system for books
 
 ## Runtime
-18.07 seconds
+20.44 seconds
 
 ## Thinking / Output
 
-Here's an example of a simple FastAPI CRUD (Create, Read, Update, Delete) system for books:
+Here's an example of a simple CRUD (Create, Read, Update, Delete) system using FastAPI and PostgreSQL as the database. We will use SQLAlchemy for interacting with the database.
+
+Firstly, make sure you have the necessary packages installed:
+
+```bash
+pip install fastapi uvicorn sqlalchemy psycopg2-binary python-multipart
+```
 
 **`main.py`**
 ```python
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-import uvicorn
 
 app = FastAPI()
 
-# Data model for Book
-class Book(BaseModel):
-    title: str
-    author: str
-    publication_date: str
+# Import database utilities
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-# In-memory data store (replace with a database in production)
-books = [
-    {"id": 1, "title": "Book 1", "author": "Author 1", "publication_date": "2020-01-01"},
-    {"id": 2, "title": "Book 2", "author": "Author 2", "publication_date": "2020-02-02"}
-]
+# Initialize the engine with the URL to your PostgreSQL database
+engine = create_engine('postgresql://user:password@localhost/database')
 
-# GET /books
-@app.get("/books")
-async def get_books():
-    return books
+# Create a configured "Session" class
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# GET /books/{book_id}
-@app.get("/books/{book_id}")
-async def get_book(book_id: int):
-    book = next((book for book in books if book["id"] == book_id), None)
-    if book is None:
-        raise HTTPException(status_code=404, detail="Book not found")
-    return book
+# Base metadata for our models
+Base = declarative_base()
 
-# POST /books
-@app.post("/books")
-async def create_book(book: Book):
-    new_book = {
-        "id": len(books) + 1,
-        "title": book.title,
-        "author": book.author,
-        "publication_date": book.publication_date
-    }
-    books.append(new_book)
-    return new_book
+class Book(Base):
+    __tablename__ = 'books'
+    id = Column(Integer, primary_key=True)
+    title = Column(String)
+    author = Column(String)
 
-# PUT /books/{book_id}
+@app.get("/books/", response_model=List[dict])
+def read_books():
+    """Get all books."""
+    db = SessionLocal()
+    try:
+        return db.query(Book).all()
+    finally:
+        db.close()
+
+@app.post("/books/")
+def create_book(new_book: dict):
+    """Create a new book."""
+    db = SessionLocal()
+    try:
+        db.add(Book(title=new_book['title'], author=new_book['author']))
+        db.commit()
+        return {"message": "Book created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+@app.get("/books/{book_id}", response_model=dict)
+def read_book(book_id: int):
+    """Get a book by ID."""
+    db = SessionLocal()
+    try:
+        return db.query(Book).filter(Book.id == book_id).first()
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    finally:
+        db.close()
+
 @app.put("/books/{book_id}")
-async def update_book(book_id: int, book: Book):
-    for existing_book in books:
-        if existing_book["id"] == book_id:
-            existing_book["title"] = book.title
-            existing_book["author"] = book.author
-            existing_book["publication_date"] = book.publication_date
-            return existing_book
+def update_book(book_id: int, updated_book: dict):
+    """Update a book by ID."""
+    db = SessionLocal()
+    try:
+        existing_book = db.query(Book).filter(Book.id == book_id).first()
+        if not existing_book:
+            raise HTTPException(status_code=404, detail="Book not found")
+        existing_book.title = updated_book['title']
+        existing_book.author = updated_book['author']
+        db.commit()
+        return {"message": "Book updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
 
-    raise HTTPException(status_code=404, detail="Book not found")
-
-# DELETE /books/{book_id}
 @app.delete("/books/{book_id}")
-async def delete_book(book_id: int):
-    for i, book in enumerate(books):
-        if book["id"] == book_id:
-            del books[i]
-            return {"message": "Book deleted"}
-    raise HTTPException(status_code=404, detail="Book not found")
+def delete_book(book_id: int):
+    """Delete a book by ID."""
+    db = SessionLocal()
+    try:
+        existing_book = db.query(Book).filter(Book.id == book_id).first()
+        if not existing_book:
+            raise HTTPException(status_code=404, detail="Book not found")
+        db.delete(existing_book)
+        db.commit()
+        return {"message": "Book deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# Base.metadata.create_all(engine)
 ```
-This example uses the `FastAPI` framework to create a simple CRUD system for books.
 
-**Endpoints**
+**`requirements.txt`**
+```bash
+fastapi uvicorn sqlalchemy psycopg2-binary python-multipart
+```
+This will create a basic CRUD system with the following endpoints:
 
-* **GET /books**: Returns all books
-* **GET /books/{book_id}**: Returns a single book by ID
-* **POST /books**: Creates a new book
-* **PUT /books/{book_id}**: Updates an existing book
-* **DELETE /books/{book_id}**: Deletes a book
+*   `GET /books/`: Returns all books.
+*   `POST /books/`: Creates a new book. The request body must be in JSON format, e.g., `{ "title": "Book Title", "author": "Author Name" }`.
+*   `GET /books/{book_id}`: Retrieves a book by ID.
+*   `PUT /books/{book_id}`: Updates an existing book. The request body must be in JSON format with the updated values.
+*   `DELETE /books/{book_id}`: Deletes a book.
 
-**Data model**
+To run this code, use:
 
-The `Book` data model is defined using the `pydantic` library. It represents a single book with title, author, and publication date.
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+You can then access these endpoints by navigating to `http://localhost:8000/docs` in your web browser or using tools like `curl` for testing.
 
-**In-memory data store**
-
-For simplicity, this example uses an in-memory data store (`books`) to store the books. In production, you should replace this with a database (e.g., PostgreSQL) to persist data across requests.
-
-To run the API, save this code to `main.py` and execute it using `uvicorn`: `$ uvicorn main:app --host 0.0.0.0 --port 8000`. The API will be available at `http://localhost:8000`.
-
-Note that this is a simplified example and you should consider implementing authentication, authorization, and validation for production use cases.
+Note that you need to replace the placeholders in `create_engine` with your actual PostgreSQL credentials and database name. Also, consider setting up a proper development environment with dependencies managed via pip. This is just a minimal example to demonstrate CRUD operations with FastAPI and SQLAlchemy.

@@ -4,47 +4,19 @@
 Create a simple FAST API CRUD system for books
 
 ## Runtime
-18.98 seconds
+13.83 seconds
 
 ## Thinking / Output
 
-Creating a simple FastAPI CRUD (Create, Read, Update, Delete) system for managing books involves several steps. Below is a step-by-step guide to help you set up the project.
+Creating a simple CRUD (Create, Read, Update, Delete) system for books using FastAPI is quite straightforward. Below is an example of how you can implement this.
 
-### Step 1: Set Up Your Project
-
-First, create a new directory for your project and navigate into it:
-
-```bash
-mkdir fastapi_crud_books
-cd fastapi_crud_books
-```
-
-Create a virtual environment and activate it:
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-```
-
-Install FastAPI and Uvicorn (a web server for running FastAPI applications):
+First, make sure you have FastAPI and Uvicorn installed. You can install them using pip:
 
 ```bash
 pip install fastapi uvicorn
 ```
 
-### Step 2: Create the Project Structure
-
-Create a directory structure for your project:
-
-```
-fastapi_crud_books/
-├── main.py
-└── requirements.txt
-```
-
-### Step 3: Define the Book Model
-
-In `main.py`, define a simple Pydantic model for the book:
+Next, create a file named `main.py` and add the following code:
 
 ```python
 from fastapi import FastAPI, HTTPException
@@ -60,14 +32,9 @@ class Book(BaseModel):
     id: int
     title: str
     author: str
-    published_year: Optional[int] = None
-```
+    published_year: int
+    is_available: bool = True
 
-### Step 4: Implement CRUD Operations
-
-Add the following routes to handle CRUD operations:
-
-```python
 @app.post("/books/", response_model=Book)
 def create_book(book: Book):
     books_db.append(book)
@@ -92,59 +59,46 @@ def update_book(book_id: int, book: Book):
             return book
     raise HTTPException(status_code=404, detail="Book not found")
 
-@app.delete("/books/{book_id}", response_model=bool)
+@app.delete("/books/{book_id}", response_model=Book)
 def delete_book(book_id: int):
-    global books_db
-    books_db = [b for b in books_db if b.id != book_id]
-    return True
+    for i, b in enumerate(books_db):
+        if b.id == book_id:
+            removed_book = books_db.pop(i)
+            return removed_book
+    raise HTTPException(status_code=404, detail="Book not found")
+
+# Example of adding a book to the database
+@app.on_event("startup")
+async def startup_event():
+    books_db.append(Book(id=1, title="1984", author="George Orwell", published_year=1949))
 ```
 
-### Step 5: Run the Application
+This code sets up a simple CRUD system for books. Here's a brief explanation of each endpoint:
 
-Run your FastAPI application using Uvicorn:
+- `POST /books/`: Creates a new book.
+- `GET /books/`: Retrieves all books.
+- `GET /books/{book_id}`: Retrieves a specific book by its ID.
+- `PUT /books/{book_id}`: Updates an existing book.
+- `DELETE /books/{book_id}`: Deletes an existing book.
+
+To run the application, use the following command:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-The `--reload` flag will automatically reload the server when you make changes to your code.
+This will start the FastAPI server on `http://127.0.0.1:8000/`. You can then test the endpoints using tools like Postman or curl.
 
-### Step 6: Test the API
+For example, to create a new book, you can use:
 
-You can test the API using tools like Postman or curl. Here are some example requests:
+```bash
+curl -X POST "http://127.0.0.1:8000/books/" -H "Content-Type: application/json" -d '{"id": 2, "title": "To Kill a Mockingbird", "author": "Harper Lee", "published_year": 1960}'
+```
 
-- **Create a book**:
-  ```bash
-  curl -X POST "http://127.0.0.1:8000/books/" -H "Content-Type: application/json" -d '{"id": 1, "title": "Book Title", "author": "Author Name"}'
-  ```
+And to retrieve all books:
 
-- **Read all books**:
-  ```bash
-  curl -X GET "http://127.0.0.1:8000/books/"
-  ```
+```bash
+curl "http://127.0.0.1:8000/books/"
+```
 
-- **Read a single book**:
-  ```bash
-  curl -X GET "http://127.0.0.1:8000/books/1"
-  ```
-
-- **Update a book**:
-  ```bash
-  curl -X PUT "http://127.0.0.1:8000/books/1" -H "Content-Type: application/json" -d '{"id": 1, "title": "Updated Title", "author": "Author Name"}'
-  ```
-
-- **Delete a book**:
-  ```bash
-  curl -X DELETE "http://127.0.0.1:8000/books/1"
-  ```
-
-### Step 7: (Optional) Create a Documentation
-
-FastAPI automatically generates interactive API documentation using Swagger UI and ReDoc:
-
-- **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-
-You can use these interfaces to test your API without writing any code.
-
-That's it! You now have a simple FastAPI CRUD system for managing books.
+This is a basic implementation and does not include database persistence or advanced features like authentication and authorization. For production use, you would typically integrate with a real database and consider additional security measures.
