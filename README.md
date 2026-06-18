@@ -171,7 +171,15 @@ The evaluation tool automates a side-by-side performance comparison to measure t
 Run the evaluation script directly inside the active service container:
 
 ```bash
-docker exec -it agentern python /app/evaluate_system.py
+docker exec -it agentern python /app/evaluate_system.py --test_task "Create a simple FAST API CRUD system for books" --agent_config=./app/agent.yaml --ollama_url=http://localhost:11434 --output ./eval_reports
+```
+
+Run it outside the container if you prefer:
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python /app/evaluate_system.py --test_task "Create a simple FAST API CRUD system for books" --agent_config=./app/agent.yaml --ollama_url=http://localhost:11434 --output ./eval_reports
 ```
 ### Reviewing the Results
 
