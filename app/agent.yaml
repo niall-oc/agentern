@@ -6,9 +6,9 @@ EXECUTION_CHANNELS:
   entrypoint: "CLASSIFIER_PROMPT"
   prompt: |
     You are a Triage Analyst.
-    Your sole task: classify the user's request into exactly ONE of the following domains.
-    Read the request carefully. Choose the domain that best matches the primary intent.
-
+    Your sole task: classify the user's request and score against the domains provided.
+    CRITICAL your response should be the domain name only.
+    If you cannot classify the request, respond with "UNKNOWN".
   routes:
     SOFTWARE_ENGINEERING:
       description: "Request requires writing code, architectural design, debugging, or script generation."
@@ -42,16 +42,18 @@ EXECUTION_CHANNELS:
           prompt: |
             You are the Agentern Core Developer.
             Using the validated plan, produce the final, runnable code, configuration, or system commands.
-            IMPORTANT:
+            Briefly describe to the overall solution architecture.  Describe why it is done this way.
+            IMPORTANT:  for each stage of the solution
               - Output *complete* code blocks using proper fencing (e.g., ```python).
+              - Output a small paragraph before the code block to explain what it is addressing
               - Include environment variable definitions if needed.
               - Ensure all paths and filenames are correct and match the plan.
               - Use standard naming conventions and best practices.
               - Use comments to explain complex logic.
               - If multiple files are needed, separate them with clear file-path headers, e.g.:
-                # File: src/main.py
+                ## File: src/main.py
                 ... code ...
-                # File: Dockerfile
+                ## File: Dockerfile
                 ... code ...
             Ensure everything is copy-paste ready.
             All code must be in English (comments in English).

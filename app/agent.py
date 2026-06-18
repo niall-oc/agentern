@@ -26,9 +26,11 @@ import json
 import os
 import asyncio
 from typing import AsyncGenerator, Optional
-
+import logging
 from vector  import VectorStore
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class AgentLoop:
     """Orchestrates the agent's multi-stage execution pipeline.
@@ -98,7 +100,7 @@ class AgentLoop:
                     return (
                         f"Error: Ollama connection dropped text chunks: {str(e)}"
                     )
-                print(
+                logger.warning(
                     f"Connection dropped mid-transit. "
                     f"Retrying turn (Attempt {attempt + 1}/3)..."
                 )
@@ -128,37 +130,30 @@ class AgentLoop:
             options_str += f"- {route_key}: {route_data['description']}\n"
         
         options_str += (
-            "Output exactly one keyword option. "
+            "Output exactly one keyword option."
             "Do not include any formatting, markdown, or introductory text."
         )
 
         return f"{base_prompt}\n\n{options_str}"
-
-    def _get_route_config(self, modality_raw: str):
-        """Resolve the raw LLM classifer output to a route configuration.
-
-        Tries an exact match first, then falls back to substring
-        matching, and finally returns the first available route if
-        nothing else works.
-
-        :param modality_raw: The raw output from the classifier LLM.
-        :returns: A tuple ``(route_config_dict, route_key_string)``.
+    
+    async def _get_route_details(self, task: str):
         """
-        routes = self.agent_config["EXECUTION_CHANNELS"]["routes"]
-        modality = modality_raw.strip().upper()
-        
-        # Exact match
-        if modality in routes:
-            return routes[modality], modality
-            
-        # Fallback heuristic if LLM output includes formatting
-        for route_key in routes.keys():
-            if route_key in modality:
-                return routes[route_key], route_key
-                
-        # Default fallback
-        fallback_key = list(routes.keys())[0]
-        return routes[fallback_key], fallback_key
+        Threshold-based routing: call the LLM to score each route category,
+        then select the route with the highest score that meets its threshold.
+        If no route meets its threshold, return (None, None) for direct LLM answer.
+
+        :param task: The user's task string.
+        :returns: route_key or none
+        """
+        classifier_prompt = self._build_classifier_prompt()
+        logger.info(f"Classifier prompt: {classifier_prompt}")
+        prompt = await self.call_llm(classifier_prompt, task)
+        logger.info(f"Classifier response: {prompt}")
+        route_key = prompt.strip()
+        routes = self.agent_config["EXECUTION_CHANNELS"].get("routes", {})
+        logger.info(f"Route key: {route_key}, routes: {routes.keys()}")
+        return route_key if route_key in routes else None
+
 
     # ------------------------------------------------------------------
     # Shared pipeline — async generator
@@ -333,6 +328,7 @@ class AgentLoop:
             return self.vector_store.search(task)
         return ""
 
+
     # ------------------------------------------------------------------
     # Public entry points
     # ------------------------------------------------------------------
@@ -356,14 +352,18 @@ class AgentLoop:
         :returns: The final output string with the full reasoning trace
             prepended inside ``<reasoning>`` tags.
         """
-        classifier_system_prompt = self._build_classifier_prompt()
-        modality_raw = await self.call_llm(
-            classifier_system_prompt, f"Task: {task}"
-        )
-        route_config, route_key = self._get_route_config(modality_raw)
+        route_key = await self._get_route_details(task)
+
+        # If no route is found fall through to the LLM
+        if route_key is None:
+            return await self.call_llm("", task)
+        
+        routes = self.agent_config["EXECUTION_CHANNELS"].get("routes", {})
+        route_config = routes.get(route_key, {})
+
 
         # Collect the full reasoning trace from all pipeline stages
-        thought_trace = [f"Classification: {modality_raw}"]
+        thought_trace = [f"Route: {route_key}"]
         final_output: str = ""
         async for label, content in self._execute_pipeline(
             task, self._get_context(task), route_config, route_key
@@ -373,9 +373,11 @@ class AgentLoop:
             else:
                 thought_trace.append(f"=== {label} ===\n{content}")
 
-        
+
         if thought_trace:
-            final_output = f"<reasoning>\n{thought_trace}\n</reasoning>\n\n{final_output}"
+
+            prompt_text = "\n\n".join(thought_trace)
+            final_output = f"<reasoning>\n{prompt_text}\n</reasoning>\n\n{final_output}"
 
         return final_output
 
@@ -405,25 +407,30 @@ class AgentLoop:
 
         yield make_sse("<think>\n")
 
-        classifier_system_prompt = self._build_classifier_prompt()
-        modality_raw = await self.call_llm(
-            classifier_system_prompt, f"Task: {task}"
-        )
-        route_config, route_key = self._get_route_config(modality_raw)
-
-        # 2. Run the shared pipeline -- convert each notification to SSE
-        #    frames *as it arrives*, yielding them progressively.
-        final_output: str = ""
-        async for label, content in self._execute_pipeline(
-            task, self._get_context(task), route_config, route_key
-        ):
-            if label == "__FINAL__":
-                final_output = content
-            else:
-                yield make_sse(f"{label}\n- {content}\n\n---\n")
+        route_key = await self._get_route_details(task)
         
-            yield make_sse(f"{label}\n- {content}\n\n---\n")
+    
+        if route_key is None:
+            yield make_sse("Passing through to model directly..</think>\n")
+            response = await self.call_llm("", task)
+            yield make_sse(response)
+
+        else:
+            # 2. Run the shared pipeline -- convert each notification to SSE
+            #    frames *as it arrives*, yielding them progressively.
+            routes = self.agent_config["EXECUTION_CHANNELS"].get("routes", {})
+            route_config = routes.get(route_key, {})
+            final_output: str = ""
+            async for label, content in self._execute_pipeline(
+                task, self._get_context(task), route_config, route_key
+            ):
+                if label == "__FINAL__":
+                    final_output = content
+                else:
+                    yield make_sse(f"{label}\n- {content}\n\n---\n")
             
-        yield make_sse("</think>\n\n")
-        yield make_sse(final_output)
-        yield "data: [DONE]\n\n"
+                yield make_sse(f"{label}\n- {content}\n\n---\n")
+                
+            yield make_sse("</think>\n\n")
+            yield make_sse(final_output)
+            yield "data: [DONE]\n\n"

@@ -6,6 +6,8 @@ import asyncio
 import yaml
 from agent import AgentLoop
 
+import logging
+
 def get_installed_models(ollama_url: str):
     """Fetch the list of available models from the host Ollama instance."""
     try:
@@ -83,6 +85,7 @@ async def main(test_task: str, agent_config: dict, ollama_url: str, output_path:
     os.makedirs(output_path, exist_ok=True)
 
     models = get_installed_models(ollama_url)
+    models = [m for m in models if not m.startswith("deep")]
     if not models:
         print("No models detected from Ollama. Exiting evaluation.")
         return

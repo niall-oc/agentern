@@ -4,130 +4,126 @@
 Create a simple FAST API CRUD system for books
 
 ## Runtime
-19.51 seconds
+18.53 seconds
 
 ## Thinking / Output
 
- To create a simple FAST API CRUD (Create, Read, Update, Delete) system for books, follow the steps below:
+ To create a simple FASTAPI CRUD (Create, Read, Update, Delete) system for books, follow the steps below:
 
-1. Install fastapi and uvicorn libraries:
+1. Install FastAPI and Uvicorn:
 
 ```bash
-pip install fastapi uvicorn sqlalchemy
+pip install fastapi uvicorn
 ```
 
-2. Create a new Python file `main.py` and add the following code:
+2. Create a new file named `main.py`, and add the following code:
 
 ```python
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTP_CONTENT_TYPES, Response
 from pydantic import BaseModel
 from typing import List, Optional
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-DATABASE_URL = "sqlite:///./books.db"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=True, bind=engine)
-
-Base = declarative_base()
-
-class Book(Base):
-    __tablename__ = "books"
-
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
-    author_id = Column(Integer, ForeignKey("authors.id"))
-
-class Author(Base):
-    __tablename__ = "authors"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-
-Base.metadata.create_all(bind=engine)
+import random
+import uuid
 
 app = FastAPI()
 
-class BookCreate(BaseModel):
+class Book(BaseModel):
+    id: str = None
     title: str
-    author_id: int
+    author: str
+    pages: int
+    published_year: int
 
-class BookUpdate(BaseModel):
-    title: Optional[str] = None
-    author_id: Optional[int] = None
+books = []
+
+def get_book_by_id(book_id: str) -> Optional[Book]:
+    return next((book for book in books if book.id == book_id), None)
+
+@app.get("/", response_class=Response)
+async def read_root():
+    return {"Hello": "World"}
 
 @app.post("/books/", response_model=Book)
-def create_book(book: BookCreate):
-    db = SessionLocal()
-    author = db.query(Author).filter(Author.id == book.author_id).first()
+def create_book(book: Book):
+    book.id = str(uuid.uuid4())
+    books.append(book)
+    return book
 
-    if not author:
-        raise HTTPException(status_code=404, detail="Author not found")
-
-    new_book = Book(title=book.title, author_id=author.id)
-    db.add(new_book)
-    db.commit()
-    db.refresh(new_book)
-
-    return new_book
-
-@app.get("/books/", response_model=List[Book])
-def read_books():
-    db = SessionLocal()
-    books = db.query(Book).all()
-    return books
-
-@app.get("/books/{book_id}", response_model=Book)
-def read_book(book_id: int):
-    db = SessionLocal()
-    book = db.query(Book).filter(Book.id == book_id).first()
-
+@app.get("/books/{book_id}", response_model=Optional[Book])
+def read_book(book_id: str):
+    book = get_book_by_id(book_id)
     if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
-
+        return None
     return book
 
 @app.put("/books/{book_id}", response_model=Book)
-def update_book(book_id: int, book: BookUpdate):
-    db = SessionLocal()
-    book_query = db.query(Book).filter(Book.id == book_id)
-    book_exists = book_query.first()
-
-    if not book_exists:
-        raise HTTPException(status_code=404, detail="Book not found")
-
-    if book.title:
-        book_query.update({Book.title: book.title})
-
-    if book.author_id:
-        author = db.query(Author).filter(Author.id == book.author_id).first()
-        if not author:
-            raise HTTPException(status_code=404, detail="Author not found")
-        book_query.update({Book.author_id: author.id})
-
-    db.commit()
-    db.refresh(book_query.first())
-    return book_query.first()
+def update_book(book_id: str, updated_book: Book):
+    existing_book = get_book_by_id(book_id)
+    if not existing_book:
+        return None
+    index = books.index(existing_book)
+    books[index] = updated_book
+    return updated_book
 
 @app.delete("/books/{book_id}")
-def delete_book(book_id: int):
-    db = SessionLocal()
-    book = db.query(Book).filter(Book.id == book_id).first()
-
+def delete_book(book_id: str):
+    book = get_book_by_id(book_id)
     if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
-
-    db.delete(book)
-    db.commit()
-
-    return {"detail": "Book deleted"}
+        return None
+    books.remove(book)
+    return {"result": "Book deleted"}
 ```
 
-3. Run the application:
+3. Run the application using Uvicorn:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Now you have a simple FAST API CRUD system for books using SQLite as the database. You can use tools like Postman or CURL to test the endpoints.
+4. Access the FastAPI endpoints at `http://127.0.0.1:8000`.
+
+You can now create, read, update and delete books using HTTP requests. To test it using curl or Postman, use the following examples:
+
+- Create a new book:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/books/" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"title\": \"The Catcher in the Rye\",
+    \"author\": \"J.D. Salinger\",
+    \"pages\": 277,
+    \"published_year\": 1951
+}"
+```
+
+- Read all books:
+
+```bash
+curl "http://127.0.0.1:8000/books/"
+```
+
+- Read a specific book by id:
+
+```bash
+curl "http://127.0.0.1:8000/books/<book_id>"
+```
+
+- Update a specific book by id:
+
+```bash
+curl -X PUT "http://127.0.0.1:8000/books/<book_id>" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"title\": \"New Title\",
+    \"author\": \"New Author\",
+    \"pages\": 300,
+    \"published_year\": 2022
+}"
+```
+
+- Delete a specific book by id:
+
+```bash
+curl -X DELETE "http://127.0.0.1:8000/books/<book_id>"
+```
